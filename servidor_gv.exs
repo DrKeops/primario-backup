@@ -125,9 +125,11 @@ defmodule ServidorGV do
 
     defp procesar_situacion_servidores(vista) do
     	
+    	#incrementa número de latidos
         nueva = %{vista | latidos: sumar_latidos(vista.latidos,
         										Map.keys(vista.latidos))} 
         
+        #comprueba si el sistema se puede encontrar inconsistente
         if (nueva.esperando_confirmacion == true && 
         Map.get(nueva.latidos,nueva.primario) >= @latidos_fallidos ||
         Map.get(nueva.latidos,nueva.primario) >= @latidos_fallidos &&
@@ -138,8 +140,10 @@ defmodule ServidorGV do
         
         end
         
+        #comprueba si ha fallado un nodo en espera
         nueva = procesar_espera(nueva,nueva.espera)	
         
+        #comprueba si ha fallado un nodo copia
         nueva = if Map.get(nueva.latidos,nueva.copia) >= @latidos_fallidos &&
 			nueva.copia != :undefined do
 
@@ -147,6 +151,7 @@ defmodule ServidorGV do
 		else nueva		
 		end
 
+		#comprueba si ha fallado un nodo primario
 		if Map.get(nueva.latidos,nueva.primario) >= @latidos_fallidos &&
 			nueva.primario != :undefined do
 			
@@ -158,12 +163,13 @@ defmodule ServidorGV do
     defp procesa_fallo(vista, nodo_origen) do
     	
     	cond do
+    		#fallo de nodo copia y lista de espera vacia
     		nodo_origen == vista.copia && Enum.empty?(vista.espera) ->
 
 				%{vista | latidos: Map.delete(vista.latidos,vista.copia),
 							num_vista: vista.num_vista + 1,
 							copia: :undefined}
-			
+			#fallo de nodo copia y algun nodo en espera
 			nodo_origen == vista.copia ->
 
 				%{vista | latidos: Map.delete(vista.latidos,vista.copia),
@@ -171,14 +177,14 @@ defmodule ServidorGV do
 							copia: hd(vista.espera),
 							espera: tl(vista.espera),
 							esperando_confirmacion: true}
-		
+			#fallo de nodo primario y lista de espera vacia
 			nodo_origen == vista.primario && Enum.empty?(vista.espera)  ->
 				
 				%{vista | latidos: Map.delete(vista.latidos,vista.primario),
 							num_vista: vista.num_vista + 1,
 							primario: vista.copia,
 							copia: :undefined}
-			
+			#fallo de nodo primario y algun nodo en espera
 			nodo_origen == vista.primario ->
 
 				%{vista | latidos: Map.delete(vista.latidos,vista.primario),
@@ -187,28 +193,32 @@ defmodule ServidorGV do
 							copia: hd(vista.espera),
 							espera: tl(vista.espera),
 							esperando_confirmacion: true}
-			true -> vista
+			#fallo de nodo en espera
+			true -> 
+				%{vista | latidos: Map.delete(vista.latidos,nodo_origen),
+							espera: List.delete(vista.espera,nodo_origen)}
         end
     end
 
     defp procesar_ping_0(nodo_origen, vista) do
-    	cond do    		
+    	cond do
+    		#nodo primario, copia o en espera envia ping 0    		
     		vista.primario == nodo_origen || vista.copia == nodo_origen ||
     		Enum.find(vista.espera, fn(x) -> x == nodo_origen end) != nil ->
 
     			nueva = procesa_fallo(vista,nodo_origen)
     			procesar_ping_0(nodo_origen,nueva)
-
+    		#inicialización nodo primario
     		vista.primario == :undefined ->
     			%{vista | primario: nodo_origen, 
     			 num_vista: vista.num_vista + 1,
     			 latidos: Map.put_new(vista.latidos,nodo_origen,0)}
-
+    		#inicializacion nodo copia
     		vista.copia == :undefined ->
     			%{vista | copia: nodo_origen, num_vista: vista.num_vista + 1,
     			 esperando_confirmacion: true,
     			 latidos: Map.put_new(vista.latidos,nodo_origen,0)}
-
+    		#inicializacion nodo en espera
     		true ->
     			%{vista | espera: vista.espera ++ [nodo_origen],
     			latidos: Map.put_new(vista.latidos,nodo_origen,0)}
@@ -217,6 +227,7 @@ defmodule ServidorGV do
 	end
 
 	defp procesar_latido(nodo_origen, vista) do
+		#llega latido con normalidad pero gv ha considerado fallo
 		nueva_vista = if (nodo_origen != vista.primario && 
 			nodo_origen != vista.copia &&
 			(Enum.find(vista.espera,fn(x) -> x == nodo_origen end)) == nil) do
@@ -225,7 +236,7 @@ defmodule ServidorGV do
 
     		else vista 
 		end
-
+		#si latido de nodo primario, confirma vista valida
 		nueva_vista = if (nodo_origen == nueva_vista.primario && 
 			vista.esperando_confirmacion == true) do
 		
@@ -235,7 +246,7 @@ defmodule ServidorGV do
 
 			else nueva_vista			
 		end
-
+		#reinicia contador de latidos
 		%{nueva_vista | latidos: Map.update(nueva_vista.latidos,nodo_origen,0,
     													fn(_) -> 0 end)}
 	end
